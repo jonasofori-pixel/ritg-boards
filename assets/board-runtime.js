@@ -371,14 +371,39 @@
       upd.textContent = board.updated;
       upd.hidden = false;
     }
+    // A printed page shows the address in its footer. Save as PDF prints from the bare address so the
+    // private key (#k=...) never lands on paper or in a saved PDF, then puts the keyed address back
+    // after printing (or at the next tap or key press, if a browser sends no afterprint).
+    // replaceState does not fire hashchange, so the board does not reload.
+    var keyedHref = null;
+    var BACK = ['pointerdown', 'keydown'];
+    function hideKey() {
+      if (keyedHref === null && location.hash) {
+        keyedHref = location.href;
+        history.replaceState(history.state, '', location.pathname + location.search);
+        BACK.forEach(function (n) { window.addEventListener(n, restoreKey, true); });
+      }
+    }
+    function restoreKey() {
+      BACK.forEach(function (n) { window.removeEventListener(n, restoreKey, true); });
+      if (keyedHref !== null) {
+        var href = keyedHref;
+        keyedHref = null;
+        history.replaceState(history.state, '', href);
+      }
+    }
     var pdf = document.getElementById('ritg-pdf');
     if (pdf) {
       pdf.hidden = false;
-      pdf.addEventListener('click', function () { window.print(); });
+      pdf.addEventListener('click', function () {
+        hideKey();
+        try { window.print(); } catch (e) { restoreKey(); }
+      });
     }
-    // Print and Save as PDF: light colours, every section open.
+    // Print and Save as PDF: light colours, every section open, charts redrawn at the printed width.
     var printState = null;
     window.addEventListener('beforeprint', function () {
+      hideKey();
       if (printState) return;
       printState = {
         theme: document.documentElement.getAttribute('data-theme'),
@@ -386,14 +411,17 @@
       };
       document.documentElement.setAttribute('data-theme', 'light');
       printState.opened.forEach(function (d) { d.open = true; });
+      document.documentElement.classList.add('rt-printing');
       dash._redraw();
     });
     window.addEventListener('afterprint', function () {
+      restoreKey();
       if (!printState) return;
       if (printState.theme !== null) document.documentElement.setAttribute('data-theme', printState.theme);
       else document.documentElement.removeAttribute('data-theme');
       printState.opened.forEach(function (d) { d.open = false; });
       printState = null;
+      document.documentElement.classList.remove('rt-printing');
       dash._redraw();
     });
   }

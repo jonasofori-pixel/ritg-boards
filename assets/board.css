@@ -346,7 +346,7 @@ a { color: inherit; }
 #dash-root .rt-about { scroll-margin-top: 12px; padding-top: 18px; border-top: 1px solid var(--color-border-line); }
 #dash-root .rt-asof { margin: 0; padding-left: 18px; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); display: grid; gap: 2px; }
 
-@media screen and (max-width: 760px) {
+@media screen and (max-width: 820px) {
   #dash-root .rt-score { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media screen and (max-width: 640px) {
@@ -369,26 +369,34 @@ a { color: inherit; }
   #dash-root .gp-foot summary { min-height: 44px; align-content: center; }
   #dash-root .rt-more > summary { padding: 12px 40px 12px 14px; }
   #dash-root .rt-more-in { padding: 4px 12px 16px; }
+}
 
+/* Wide tables read as cards up to 820 px (phones and iPad portrait, the same width where the tiles go 2x2): each cell
+   is a two-column grid (its column name, then the value), so a long name grows the row instead of spilling out of it.
+   Cells with no column name (totals) stay plain. Pills keep their text width inside the grid. */
+@media screen and (max-width: 820px) {
   #dash-root .gp-two { grid-template-columns: minmax(0, 1fr); }
   #dash-root table.rt-stack { min-width: 0 !important; width: 100%; border: 0; }
   #dash-root table.rt-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  #dash-root table.rt-stack tbody, #dash-root table.rt-stack tr, #dash-root table.rt-stack td { display: block; width: 100%; }
+  #dash-root table.rt-stack tbody, #dash-root table.rt-stack tfoot, #dash-root table.rt-stack tr { display: block; width: 100%; }
   #dash-root table.rt-stack tr {
     border: 1px solid var(--color-border-line); border-radius: 10px; padding: 8px 12px; margin: 0 0 8px;
     background: var(--color-panel);
   }
   #dash-root table.rt-stack td {
-    position: relative; padding: 3px 0 3px 38%; border: 0; text-align: left; white-space: normal; min-width: 0;
-    overflow-wrap: anywhere;
+    display: grid; grid-template-columns: 34% minmax(0, 1fr); column-gap: 4%;
+    padding: 3px 0; border: 0; text-align: left; white-space: normal; min-width: 0; overflow-wrap: anywhere;
   }
   #dash-root table.rt-stack td::before {
-    content: attr(data-label); position: absolute; left: 0; top: 4px; width: 34%;
+    content: attr(data-label);
     color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); font-weight: 400; line-height: 1.35;
   }
-  #dash-root table.rt-stack td:first-child { padding: 0 0 6px; font-weight: 600; }
+  #dash-root table.rt-stack td:not([data-label]) { display: block; padding-left: 38%; }
+  #dash-root table.rt-stack td:not([data-label])::before { content: none; }
+  #dash-root table.rt-stack td:first-child { display: block; padding: 0 0 6px; font-weight: 600; }
   #dash-root table.rt-stack td:first-child::before { content: none; }
-  #dash-root table.rt-stack .gp-pill { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  #dash-root table.rt-stack td:first-child .basis { font-weight: 400; }
+  #dash-root table.rt-stack .gp-pill { max-width: 100%; white-space: normal; overflow-wrap: anywhere; justify-self: start; align-self: start; }
   #dash-root .gp-scroll { position: relative; overflow-x: auto; }
 }
 
@@ -409,7 +417,7 @@ a { color: inherit; }
   .ritg-bar-in { padding-inline: 0; }
   .ritg-mark { color: var(--color-fg); }
   .ritg-mark b { color: var(--rt-accent); }
-  #dash-root .rt-score, #dash-root .gp-bar { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #dash-root .rt-score, #dash-root .gp-bar, #dash-root .gp-sw, #dash-root .gp-dot { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   #dash-root .rt-next {
     background: #FFF; color: var(--color-fg); border-color: var(--color-border-line);
     border-inline-start-color: var(--ritg-gold);
@@ -441,7 +449,13 @@ a { color: inherit; }
   #dash-root .gp-table th, #dash-root .gp-table td { padding-inline-end: 7px; }
   #dash-root .gp-table { overflow-wrap: break-word; }
   #dash-root .gp-table td.num { white-space: nowrap; overflow-wrap: normal; }
-  #dash-root h2, #dash-root .rt-glabel, #dash-root summary { break-after: avoid; }
+  #dash-root h2, #dash-root .rt-glabel, #dash-root summary, #dash-root .gp-sub { break-after: avoid; }
   #dash-root .gp-chart, #dash-root .gp-goal, #dash-root .rt-score,
   #dash-root .rt-next, #dash-root tr { break-inside: avoid; }
+  #dash-root .gp-sec:has(> .gp-chart) { break-inside: avoid; }
 }
+
+/* While printing, the runtime adds .rt-printing and redraws: charts take the 7.5 in page width, one per row. */
+html.rt-printing #dash-root { width: 7.5in; max-width: none; padding-left: 0; padding-right: 0; }
+html.rt-printing #dash-root .gp-two { display: block; }
+html.rt-printing #dash-root .gp-two > * + * { margin-top: 16px; }

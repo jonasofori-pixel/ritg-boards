@@ -144,8 +144,8 @@
       return u;
     }
 
-    // Hero: the board's own eyebrow and title, then one line on the period. The long opening paragraph moves
-    // to the top of Results, and the read times move to About this data.
+    // Keep the reporting period and update date together. The opening paragraph and source read times
+    // move to Results and About this data.
     var head = gp.querySelector('.gp-head');
     var intro = head && head.querySelector('.gp-take');
     var asof = head && head.querySelector('.gp-asof');
@@ -153,7 +153,11 @@
     if (title && t.title) title.textContent = t.title;
     if (intro) intro.remove();
     if (asof) asof.remove();
-    if (head && t.period) head.appendChild(el('p', 'rt-period', t.period));
+    if (head) {
+      var meta = el('div', 'rt-meta');
+      if (t.period) meta.appendChild(el('p', 'rt-period', t.period));
+      head.appendChild(meta);
+    }
 
     // Scorecard
     var score = el('div', 'rt-score');
@@ -361,7 +365,12 @@
 
   function tools(board, root, dash) {
     var upd = document.getElementById('ritg-upd');
-    if (upd && board.updated) { upd.textContent = board.updated; upd.hidden = false; }
+    if (upd && board.updated) {
+      var meta = root.querySelector('.rt-meta');
+      if (meta) meta.appendChild(upd);
+      upd.textContent = board.updated;
+      upd.hidden = false;
+    }
     var pdf = document.getElementById('ritg-pdf');
     if (pdf) {
       pdf.hidden = false;

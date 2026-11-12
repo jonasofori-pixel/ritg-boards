@@ -61,6 +61,9 @@
     var scripts = [];
     tpl.content.querySelectorAll('script').forEach(function (s) { scripts.push(s.textContent); s.remove(); });
     tpl.content.querySelectorAll('meta').forEach(function (s) { s.remove(); });
+    if (board.template) {
+      try { applyTemplate(tpl.content, board.template); } catch (e) { console.error('Board template failed', e); }
+    }
     root.replaceChildren(tpl.content);
 
     var dash = makeDash(board.data || {}, root);
@@ -74,6 +77,259 @@
       }
     });
     dash._start();
+    tools(board, root, dash);
+  }
+
+  /* ---------- Shared client template ----------
+     Every board keeps its own sections, numbers and wording. The template only arranges them the same way:
+     scorecard, what to do next, results, what we did, calls, Google and social, all the numbers (closed),
+     about this data. Tiles reuse the board's own named values, so they show exactly what the board shows. */
+
+  var GROUPS = [
+    { key: 'results', label: 'Results' },
+    { key: 'work', label: 'What we did' },
+    { key: 'calls', label: 'Calls' },
+    { key: 'online', label: 'Google and social' }
+  ];
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function stripIds(node) {
+    if (node.removeAttribute) node.removeAttribute('id');
+    if (node.querySelectorAll) node.querySelectorAll('[id]').forEach(function (n) { n.removeAttribute('id'); });
+    return node;
+  }
+
+  function applyTemplate(frag, t) {
+    var gp = frag.querySelector('.gp');
+    if (!gp) return;
+    function orig(name) { return frag.querySelector('[data-draw="' + name + '"]'); }
+    function value(name) {
+      var o = orig(name);
+      var c = o ? stripIds(o.cloneNode(true)) : el('b');
+      if (!o) c.setAttribute('data-draw', name);
+      c.classList.remove('gp-big');
+      return c;
+    }
+    function fill(target, text) {
+      String(text).split(/(\{[^}]+\})/).forEach(function (part) {
+        if (!part) return;
+        var m = part.match(/^\{(.+)\}$/);
+        target.appendChild(m ? value(m[1]) : document.createTextNode(part));
+      });
+      return target;
+    }
+
+    // A section, or a wrapper (such as a two-column row) holding several sections, moves as one unit.
+    var sections = {};
+    var units = [];
+    Array.prototype.forEach.call(gp.children, function (c) {
+      if (c.classList.contains('gp-head') || c.classList.contains('gp-foot')) return;
+      var ids = c.tagName === 'SECTION' && c.id ? [c.id]
+        : Array.prototype.map.call(c.querySelectorAll('section[id]'), function (s) { return s.id; });
+      if (!ids.length) return;
+      units.push(c);
+      ids.forEach(function (id) { sections[id] = c; });
+    });
+    var usedUnits = [];
+    function take(id) {
+      var u = sections[id];
+      if (!u || usedUnits.indexOf(u) >= 0) return null;
+      usedUnits.push(u);
+      return u;
+    }
+
+    // Hero: the board's own eyebrow and title, then one line on the period. The long opening paragraph moves
+    // to the top of Results, and the read times move to About this data.
+    var head = gp.querySelector('.gp-head');
+    var intro = head && head.querySelector('.gp-take');
+    var asof = head && head.querySelector('.gp-asof');
+    if (intro) intro.remove();
+    if (asof) asof.remove();
+    if (head && t.period) head.appendChild(el('p', 'rt-period', t.period));
+
+    // Scorecard
+    var score = el('div', 'rt-score');
+    score.setAttribute('role', 'list');
+    (t.tiles || []).forEach(function (tile) {
+      var d = el('div', 'rt-tile');
+      d.setAttribute('role', 'listitem');
+      d.appendChild(el('p', 'rt-k', tile.label));
+      var v = el('p', 'rt-v');
+      v.appendChild(value(tile.value));
+      d.appendChild(v);
+      if (tile.bar) {
+        var b = orig(tile.bar);
+        if (b && b.parentElement) d.appendChild(stripIds(b.parentElement.cloneNode(true)));
+      }
+      if (tile.sub) {
+        var s = el('p', 'rt-s');
+        if (tile.cmp) {
+          var a = el('span', 'rt-arrow');
+          a.setAttribute('data-v', tile.value);
+          a.setAttribute('data-r', tile.cmp);
+          a.setAttribute('aria-hidden', 'true');
+          s.appendChild(a);
+        }
+        d.appendChild(fill(s, tile.sub));
+      }
+      if (tile.note) d.appendChild(fill(el('p', 'rt-n'), tile.note));
+      score.appendChild(d);
+    });
+
+    // What to do next: the board's own levers, first.
+    var next = take('levers');
+    if (next) {
+      next.classList.add('rt-next');
+      var h = next.querySelector('.gp-h2, h2');
+      if (h) h.textContent = 'What to do next';
+    }
+
+    // Groups
+    var groups = t.groups || {};
+    var built = [];
+    GROUPS.forEach(function (g) {
+      var ids = g.key === 'work' ? (groups.work || ['work']) : (groups[g.key] || []);
+      var secs = ids.map(take).filter(Boolean);
+      if (g.key === 'results' && intro) {
+        intro.classList.add('rt-intro');
+        secs.unshift(intro);
+      }
+      if (!secs.length) return;
+      var box = el('div', 'rt-group');
+      box.id = 'rt-' + g.key;
+      var count = secs.reduce(function (n, s) { return n + (s.tagName === 'SECTION' ? 1 : s.querySelectorAll('section').length); }, 0);
+      if (count > 1) box.appendChild(el('p', 'rt-glabel', g.label));
+      secs.forEach(function (s) { box.appendChild(s); });
+      built.push({ key: g.key, label: g.label, node: box });
+    });
+
+    // Everything else, closed until asked for.
+    var rest = units.filter(function (u) { return usedUnits.indexOf(u) < 0; });
+    if (rest.length) {
+      var more = el('details', 'rt-more');
+      more.id = 'rt-more';
+      var sum = el('summary');
+      sum.appendChild(el('span', 'rt-mt', 'All the numbers'));
+      sum.appendChild(el('span', 'rt-mh', rest.map(function (s) {
+        return Array.prototype.map.call(s.querySelectorAll('h2'), function (hh) { return hh.textContent.trim(); }).join(' · ');
+      }).filter(Boolean).join(' · ')));
+      more.appendChild(sum);
+      var inner = el('div', 'rt-more-in');
+      rest.forEach(function (s) { inner.appendChild(s); });
+      more.appendChild(inner);
+      built.push({ key: 'more', label: 'All the numbers', node: more });
+    }
+
+    // About this data: read times, how the numbers are counted.
+    var foot = gp.querySelector('details.gp-foot');
+    var about = el('section', 'gp-sec rt-about');
+    about.id = 'rt-about';
+    about.appendChild(el('h2', 'gp-h2', 'About this data'));
+    if (asof) {
+      var ul = el('ul', 'rt-asof');
+      Array.prototype.forEach.call(asof.children.length ? asof.children : [asof], function (sp) {
+        var li = el('li');
+        while (sp.firstChild) li.appendChild(sp.firstChild);
+        ul.appendChild(li);
+      });
+      about.appendChild(ul);
+    }
+    if (foot) about.appendChild(foot);
+
+    // Jump buttons. They scroll in place: a #link would drop the board's key from the address.
+    var jump = el('nav', 'rt-jump');
+    jump.setAttribute('aria-label', 'Sections');
+    built.concat([{ key: 'about', label: 'About this data', node: about }]).forEach(function (g) {
+      var btn = el('button', null, g.label);
+      btn.type = 'button';
+      btn.addEventListener('click', function () {
+        if (g.node.tagName === 'DETAILS') g.node.open = true;
+        g.node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      jump.appendChild(btn);
+    });
+
+    // New order inside the board.
+    var order = [score];
+    if (next) order.push(next);
+    order.push(jump);
+    built.forEach(function (g) { order.push(g.node); });
+    order.push(about);
+    var anchor = head && head.parentElement === gp ? head.nextSibling : gp.firstChild;
+    order.forEach(function (n) { gp.insertBefore(n, anchor); });
+  }
+
+  function num(text) {
+    var m = String(text || '').replace(/,/g, '').match(/-?\d+(\.\d+)?/);
+    if (!m) return null;
+    var n = parseFloat(m[0]);
+    if (/\d\s*K\b/i.test(text)) n *= 1000;
+    return n;
+  }
+
+  // Up or down arrows on tiles that compare the same days of two months.
+  function arrows(root) {
+    root.querySelectorAll('.rt-arrow').forEach(function (a) {
+      var tile = a.closest('.rt-tile');
+      var v = tile && tile.querySelector('[data-draw="' + a.getAttribute('data-v') + '"]');
+      var r = tile && tile.querySelector('.rt-s [data-draw="' + a.getAttribute('data-r') + '"]');
+      var nv = v && num(v.textContent), nr = r && num(r.textContent);
+      a.className = 'rt-arrow';
+      a.textContent = '';
+      if (nv == null || nr == null || nv === nr) return;
+      a.classList.add(nv > nr ? 'rt-up' : 'rt-down');
+      a.textContent = nv > nr ? '▲ ' : '▼ ';
+    });
+  }
+
+  // Wide tables read as stacked cards on a phone: each cell carries its column name.
+  function labelTables(root) {
+    root.querySelectorAll('table').forEach(function (tb) {
+      var head = tb.tHead && tb.tHead.rows.length ? tb.tHead.rows[tb.tHead.rows.length - 1] : null;
+      if (!head) return;
+      var names = Array.prototype.map.call(head.cells, function (c) { return c.textContent.trim(); });
+      if (names.length >= 4) tb.classList.add('rt-stack');
+      Array.prototype.forEach.call(tb.tBodies, function (body) {
+        Array.prototype.forEach.call(body.rows, function (row) {
+          Array.prototype.forEach.call(row.cells, function (cell, i) {
+            if (names[i] && cell.getAttribute('data-label') !== names[i]) cell.setAttribute('data-label', names[i]);
+          });
+        });
+      });
+    });
+  }
+
+  function tools(board, root, dash) {
+    var upd = document.getElementById('ritg-upd');
+    if (upd && board.updated) { upd.textContent = board.updated; upd.hidden = false; }
+    var pdf = document.getElementById('ritg-pdf');
+    if (pdf) {
+      pdf.hidden = false;
+      pdf.addEventListener('click', function () { window.print(); });
+    }
+    // Print and Save as PDF: light colours, every section open.
+    var opened = [];
+    var hadTheme = null;
+    window.addEventListener('beforeprint', function () {
+      hadTheme = document.documentElement.getAttribute('data-theme');
+      document.documentElement.setAttribute('data-theme', 'light');
+      opened = Array.prototype.filter.call(root.querySelectorAll('details.rt-more'), function (d) { return !d.open; });
+      opened.forEach(function (d) { d.open = true; });
+      dash._redraw();
+    });
+    window.addEventListener('afterprint', function () {
+      if (hadTheme) document.documentElement.setAttribute('data-theme', hadTheme);
+      else document.documentElement.removeAttribute('data-theme');
+      opened.forEach(function (d) { d.open = false; });
+      opened = [];
+      dash._redraw();
+    });
   }
 
   function makeDash(data, root) {
@@ -128,6 +384,9 @@
       var sel = '[data-draw="' + (window.CSS && CSS.escape ? CSS.escape(name) : name) + '"]';
       return Array.prototype.filter.call(root.querySelectorAll(sel), function (el) {
         if (el.closest('[hidden]')) return false;
+        // Closed sections draw when opened, at their real width.
+        var shut = el.closest('details:not([open])');
+        if (shut && !el.closest('summary')) return false;
         var parent = el.parentElement;
         return !(parent && parent.closest('[data-draw]'));
       });
@@ -152,11 +411,19 @@
       }
     }
 
-    function drawName(name) { targets(name).forEach(function (el) { drawOne(name, el); }); }
+    function after() {
+      try { labelTables(root); arrows(root); } catch (e) { console.error('Template pass failed', e); }
+    }
+
+    function drawName(name, quiet) {
+      targets(name).forEach(function (el) { drawOne(name, el); });
+      if (!quiet) after();
+    }
 
     function drawAll() {
       onDataFns.forEach(function (fn) { try { fn(); } catch (e) { console.error('onData failed', e); } });
-      draws.forEach(function (_, name) { drawName(name); });
+      draws.forEach(function (_, name) { drawName(name, true); });
+      after();
     }
 
     var pending = 0;
@@ -184,9 +451,13 @@
       setParams: function () {},
       resetParams: function () {},
       setLink: function () {},
+      _redraw: function () { drawAll(); },
       _start: function () {
         started = true;
         drawAll();
+
+        // A section opened from "All the numbers" or "How these numbers are counted" draws then.
+        root.addEventListener('toggle', function (e) { if (e.target.open) drawAll(); }, true);
 
         // Redraw when the page width changes (charts size themselves from it).
         var lastWidth = root.clientWidth;

@@ -51,7 +51,8 @@
   }
 
   function mount(board) {
-    if (board.title) document.title = board.title + ' · Rise in the Gap';
+    var title = (board.template && board.template.title) || board.title;
+    if (title) document.title = title + ' · Rise in the Gap';
     var snap = document.getElementById('ritg-snap');
     if (snap && board.snapshot) snap.textContent = board.snapshot;
 
@@ -81,9 +82,8 @@
   }
 
   /* ---------- Shared client template ----------
-     Every board keeps its own sections, numbers and wording. The template only arranges them the same way:
-     scorecard, what to do next, results, what we did, calls, Google and social, all the numbers (closed),
-     about this data. Tiles reuse the board's own named values, so they show exactly what the board shows. */
+     The scorecard uses the board's own drawn values. The template adds short priorities and keeps
+     the original action list, results, channels and methodology available lower down. */
 
   var GROUPS = [
     { key: 'results', label: 'Results' },
@@ -149,6 +149,8 @@
     var head = gp.querySelector('.gp-head');
     var intro = head && head.querySelector('.gp-take');
     var asof = head && head.querySelector('.gp-asof');
+    var title = head && head.querySelector('h1');
+    if (title && t.title) title.textContent = t.title;
     if (intro) intro.remove();
     if (asof) asof.remove();
     if (head && t.period) head.appendChild(el('p', 'rt-period', t.period));
@@ -156,6 +158,7 @@
     // Scorecard
     var score = el('div', 'rt-score');
     score.setAttribute('role', 'list');
+    score.setAttribute('aria-label', 'Performance at a glance');
     (t.tiles || []).forEach(function (tile) {
       var d = el('div', 'rt-tile');
       d.setAttribute('role', 'listitem');
@@ -163,9 +166,14 @@
       var v = el('p', 'rt-v');
       v.appendChild(value(tile.value));
       d.appendChild(v);
-      if (tile.bar) {
-        var b = orig(tile.bar);
-        if (b && b.parentElement) d.appendChild(stripIds(b.parentElement.cloneNode(true)));
+      var bar = tile.bar && orig(tile.bar);
+      var pace = false;
+      if (bar && bar.parentElement) {
+        var meter = stripIds(bar.parentElement.cloneNode(true));
+        meter.setAttribute('aria-hidden', 'true');
+        pace = Boolean(meter.querySelector('.gp-bar-tick'));
+        if (pace) meter.classList.add('rt-pace-bar');
+        d.appendChild(meter);
       }
       if (tile.sub) {
         var s = el('p', 'rt-s');
@@ -179,12 +187,34 @@
         d.appendChild(fill(s, tile.sub));
       }
       if (tile.note) d.appendChild(fill(el('p', 'rt-n'), tile.note));
+      if (pace) d.appendChild(el('p', 'rt-pace'));
       score.appendChild(d);
     });
 
-    // What to do next: the board's own levers, first.
-    var next = take('levers');
-    if (next) {
+    // Keep the short priorities above navigation and retain the original levers in the details.
+    var next = null;
+    if (t.priorities && t.priorities.length) {
+      next = el('section', 'gp-sec rt-next');
+      var heading = el('h2', 'gp-h2', 'What to do next');
+      heading.id = 'rt-next-title';
+      next.setAttribute('aria-labelledby', heading.id);
+      next.appendChild(heading);
+      var priorities = el('ul', 'rt-priorities');
+      t.priorities.forEach(function (priority) {
+        var item = el('li');
+        item.appendChild(el('span', 'rt-owner', priority.owner));
+        item.appendChild(el('span', 'rt-action', priority.action));
+        priorities.appendChild(item);
+      });
+      next.appendChild(priorities);
+
+      var full = sections.levers && sections.levers.querySelector('.gp-h2, h2');
+      if (full) full.textContent = 'Full action list';
+    } else {
+      // Older snapshots already in a reader's cache still use their original action list.
+      next = take('levers');
+    }
+    if (next && !next.classList.contains('rt-next')) {
       next.classList.add('rt-next');
       var h = next.querySelector('.gp-h2, h2');
       if (h) h.textContent = 'What to do next';
@@ -204,7 +234,7 @@
       var box = el('div', 'rt-group');
       box.id = 'rt-' + g.key;
       var count = secs.reduce(function (n, s) { return n + (s.tagName === 'SECTION' ? 1 : s.querySelectorAll('section').length); }, 0);
-      if (count > 1) box.appendChild(el('p', 'rt-glabel', g.label));
+      if (count > 1) box.appendChild(el('h2', 'rt-glabel', g.label));
       secs.forEach(function (s) { box.appendChild(s); });
       built.push({ key: g.key, label: g.label, node: box });
     });
@@ -248,15 +278,23 @@
     built.concat([{ key: 'about', label: 'About this data', node: about }]).forEach(function (g) {
       var btn = el('button', null, g.label);
       btn.type = 'button';
+      btn.setAttribute('aria-controls', g.node.id);
       btn.addEventListener('click', function () {
         if (g.node.tagName === 'DETAILS') g.node.open = true;
-        g.node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        var target = g.node.querySelector('summary, h2, h3');
+        if (target) {
+          if (target.tagName !== 'SUMMARY') target.tabIndex = -1;
+          target.focus({ preventScroll: true });
+        }
+        var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        g.node.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
       });
       jump.appendChild(btn);
     });
 
     // New order inside the board.
     var order = [score];
+    if (t.note) order.push(el('p', 'rt-board-note', t.note));
     if (next) order.push(next);
     order.push(jump);
     built.forEach(function (g) { order.push(g.node); });
@@ -288,6 +326,22 @@
     });
   }
 
+  // Pair the source board's visual pace marker with a text comparison on the scorecard.
+  function paceLabels(root) {
+    root.querySelectorAll('.rt-pace-bar').forEach(function (meter) {
+      var status = meter.parentElement.querySelector('.rt-pace');
+      var fill = meter.querySelector('.gp-bar-fill');
+      var tick = meter.querySelector('.gp-bar-tick');
+      var progress = fill && parseFloat(fill.style.width);
+      var marker = tick && parseFloat(tick.style.left);
+      if (!status || !Number.isFinite(progress) || !Number.isFinite(marker)) return;
+      var label = 'At pace';
+      if (progress < marker) label = 'Behind pace';
+      if (progress > marker) label = 'Ahead of pace';
+      status.textContent = label;
+    });
+  }
+
   // Wide tables read as stacked cards on a phone: each cell carries its column name.
   function labelTables(root) {
     root.querySelectorAll('table').forEach(function (tb) {
@@ -314,20 +368,23 @@
       pdf.addEventListener('click', function () { window.print(); });
     }
     // Print and Save as PDF: light colours, every section open.
-    var opened = [];
-    var hadTheme = null;
+    var printState = null;
     window.addEventListener('beforeprint', function () {
-      hadTheme = document.documentElement.getAttribute('data-theme');
+      if (printState) return;
+      printState = {
+        theme: document.documentElement.getAttribute('data-theme'),
+        opened: Array.from(root.querySelectorAll('details:not([open])'))
+      };
       document.documentElement.setAttribute('data-theme', 'light');
-      opened = Array.prototype.filter.call(root.querySelectorAll('details.rt-more'), function (d) { return !d.open; });
-      opened.forEach(function (d) { d.open = true; });
+      printState.opened.forEach(function (d) { d.open = true; });
       dash._redraw();
     });
     window.addEventListener('afterprint', function () {
-      if (hadTheme) document.documentElement.setAttribute('data-theme', hadTheme);
+      if (!printState) return;
+      if (printState.theme !== null) document.documentElement.setAttribute('data-theme', printState.theme);
       else document.documentElement.removeAttribute('data-theme');
-      opened.forEach(function (d) { d.open = false; });
-      opened = [];
+      printState.opened.forEach(function (d) { d.open = false; });
+      printState = null;
       dash._redraw();
     });
   }
@@ -412,7 +469,7 @@
     }
 
     function after() {
-      try { labelTables(root); arrows(root); } catch (e) { console.error('Template pass failed', e); }
+      try { labelTables(root); arrows(root); paceLabels(root); } catch (e) { console.error('Template pass failed', e); }
     }
 
     function drawName(name, quiet) {

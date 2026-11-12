@@ -205,7 +205,10 @@ a { color: inherit; }
 }
 #dash-root .rt-v > * { font: inherit; }
 #dash-root .rt-s, #dash-root .rt-n { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); line-height: 1.4; }
-#dash-root .rt-s > *, #dash-root .rt-n > * { font-weight: 600; color: var(--color-fg); }
+#dash-root .rt-s > *, #dash-root .rt-n > * {
+  font-family: inherit; font-size: inherit; line-height: inherit; letter-spacing: inherit;
+  font-weight: 600; color: var(--color-fg); margin: 0; padding: 0; display: inline;
+}
 #dash-root .rt-s > .rt-arrow { font-weight: 400; }
 #dash-root .rt-arrow.rt-up { color: var(--color-ok); }
 #dash-root .rt-arrow.rt-down { color: var(--color-bad); }
